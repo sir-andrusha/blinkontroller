@@ -120,7 +120,7 @@
                         const macVal = event.target.id;
 
                         // Отправка REST-запроса на сервер
-                        fetch('http://' + item.ip + '/api/v1/light/brightness', {
+                        fetch('http://' + window.location.host + '/api/v1/light/brightness', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json'
@@ -160,7 +160,7 @@
             async function runWithInterval() {
                 while (true) {
                     await updateTable();
-                    await new Promise((resolve) => setTimeout(resolve, 3000));
+                    await new Promise((resolve) => setTimeout(resolve, 1500));
                 }
             }
             runWithInterval();

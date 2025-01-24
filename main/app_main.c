@@ -223,7 +223,7 @@ const node_info_list_t *esp_mesh_lite_get_nodes_list(uint32_t *size)
 }
 
 
-static esp_err_t esp_mesh_lite_node_info_update(uint8_t red, uint8_t green, uint8_t blue, uint8_t* mac, uint32_t ip_addr, uint8_t level)
+static esp_err_t esp_mesh_lite_node_info_update(uint8_t red, uint8_t green, uint8_t blue, uint8_t* mac, uint32_t ip_addr, uint8_t level, bool checkOnlyColor)
 {
     xSemaphoreTake(node_info_mutex, portMAX_DELAY);
     node_info_list_t* new = node_info_list;
@@ -233,7 +233,7 @@ static esp_err_t esp_mesh_lite_node_info_update(uint8_t red, uint8_t green, uint
         if (!memcmp(new->node->mac_addr, mac, ETH_HWADDR_LEN)) {
             new->ttl = (CONFIG_MESH_LITE_REPORT_INTERVAL + MESH_LITE_REPORT_INTERVAL_BUFFER);
             if ((new->node->red != red) || (new->node->green != green) || (new->node->blue != blue) 
-                        || new->node->ip_addr != ip_addr || new->node->level != level) {
+                        || (!checkOnlyColor && new->node->ip_addr != ip_addr) || (!checkOnlyColor && new->node->level != level) ) {
                 new->node->red = red;
                 new->node->green = green;
                 new->node->blue = blue;
@@ -338,6 +338,20 @@ static esp_err_t names_get_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
+static esp_err_t str2mac(const char *str, uint8_t *mac_addr)
+{
+    unsigned int mac_tmp[ETH_HWADDR_LEN];
+    if (ETH_HWADDR_LEN != sscanf(str, "%02x:%02x:%02x:%02x:%02x:%02x%*c",
+                    &mac_tmp[0], &mac_tmp[1], &mac_tmp[2],
+                    &mac_tmp[3], &mac_tmp[4], &mac_tmp[5])) {
+        return ESP_ERR_INVALID_MAC;
+    }
+    for (int i = 0; i < ETH_HWADDR_LEN; i++) {
+        mac_addr[i] = (uint8_t)mac_tmp[i];
+    }
+    return ESP_OK;
+}
+
 static esp_err_t registry_post_handler(httpd_req_t* req)
 {
     int total_len = req->content_len;
@@ -359,24 +373,28 @@ static esp_err_t registry_post_handler(httpd_req_t* req)
         cur_len += received;
     }
     buf[total_len] = '\0';
+    //ESP_LOGI(TAG, "buf %s", buf);
 
     cJSON* root = cJSON_Parse(buf);
-    uint8_t mac = cJSON_GetObjectItem(root, "mac")->valueint;
+    char *mac_str = cJSON_GetObjectItem(root, "mac")->valuestring;
     uint32_t ip_addr = cJSON_GetObjectItem(root, "ip")->valueint;
     uint8_t lvl = cJSON_GetObjectItem(root, "level")->valueint;
     uint8_t red = cJSON_GetObjectItem(root, "red")->valueint;
     uint8_t green = cJSON_GetObjectItem(root, "green")->valueint;
     uint8_t blue = cJSON_GetObjectItem(root, "blue")->valueint;
+
+    ESP_LOGI(TAG, "Registration of node with mac %s, and ip %" PRIu32, mac_str, ip_addr);
+
+    uint8_t mac_addr[ETH_HWADDR_LEN];
+    str2mac(mac_str, mac_addr);
+    bool checkOnlyColor = false;
+    esp_mesh_lite_node_info_update(red, green, blue, mac_addr, ip_addr, lvl, checkOnlyColor);
+
     cJSON_Delete(root);
 
-    ESP_LOGI(TAG, "Registration of node with mac %d, and ip %" PRIu32, mac, ip_addr);
-
-    esp_mesh_lite_node_info_update(red, green, blue, &mac, ip_addr, lvl);
-
-    httpd_resp_sendstr(req, "Post control value successfully");
+    httpd_resp_sendstr(req, "{\"status\":\"Post control value successfully\"}");
     return ESP_OK;
 }
-
 
 static esp_err_t light_brightness_post_handler(httpd_req_t* req)
 {
@@ -401,16 +419,21 @@ static esp_err_t light_brightness_post_handler(httpd_req_t* req)
     buf[total_len] = '\0';
 
     cJSON* root = cJSON_Parse(buf);
-    uint8_t mac = cJSON_GetObjectItem(root, "mac")->valueint;
+    char *mac_str = cJSON_GetObjectItem(root, "mac")->valuestring;
     uint8_t red = cJSON_GetObjectItem(root, "red")->valueint;
     uint8_t green = cJSON_GetObjectItem(root, "green")->valueint;
     uint8_t blue = cJSON_GetObjectItem(root, "blue")->valueint;
+
+    ESP_LOGI(TAG, "Light control: mac=%s, red = %d, green = %d, blue = %d", mac_str, red, green, blue);
+
+    uint8_t mac_addr[ETH_HWADDR_LEN];
+    str2mac(mac_str, mac_addr);
+    bool checkOnlyColor = true;
+    esp_mesh_lite_node_info_update(red, green, blue, mac_addr, 0, 0, checkOnlyColor);
+
     cJSON_Delete(root);
 
-
-    ESP_LOGI(TAG, "Light control: mac=%d, red = %d, green = %d, blue = %d", mac, red, green, blue);
-
-    httpd_resp_sendstr(req, "Post control value successfully");
+    httpd_resp_sendstr(req, "{}");
     return ESP_OK;
 }
 
