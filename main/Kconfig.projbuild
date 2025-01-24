@@ -27,4 +27,24 @@ menu "Bridge Misc Configuration"
             help
                 Set the GPIO button of switch.
     endmenu
+
+
+    config EXAMPLE_WEB_MOUNT_POINT
+        string "Website mount point in VFS"
+        default "/www"
+        help
+            Specify the mount point in VFS.
+    
+    config EXAMPLE_MDNS_HOST_NAME
+        string "mDNS Host Name"
+        default "blinker"
+        help
+            Specify the domain name used in the mDNS service.
+            Note that webpage also take it as a part of URL where it will send GET/POST requests to.
+             
+    config BLINKER_ENABLE
+        bool "blinker enabling"
+        default n
+        help
+            Configure blinker.
 endmenu
