@@ -34,9 +34,7 @@
 #define BUTTON_REPEAT_TIME    5
 
 static const char* TAG = "main";
-static button_handle_t g_btns[BUTTON_NUM] = { 0 };
-static bool button_long_press = false;
-static esp_timer_handle_t restart_timer;
+
 
 static esp_err_t esp_storage_init(void)
 {
@@ -308,7 +306,6 @@ static esp_mesh_lite_node_info_t* esp_mesh_lite_get_node(uint8_t* mac)
 {
     xSemaphoreTake(node_info_mutex, portMAX_DELAY);
     node_info_list_t* new = node_info_list;
-    node_info_list_t* prev = NULL;
 
     while (new) {
         if (!memcmp(new->node->mac_addr, mac, ETH_HWADDR_LEN)) {
@@ -431,6 +428,7 @@ static esp_err_t registry_post_handler(httpd_req_t* req)
     cJSON_AddNumberToObject(item, "green", green);
     cJSON_AddNumberToObject(item, "blue", blue);
     const char* resp = cJSON_Print(item);
+    cJSON_Delete(item);
 
     httpd_resp_set_type(req, "application/json");
     httpd_resp_sendstr(req, resp);
