@@ -33,7 +33,7 @@
 #define BUTTON_PRESS_TIME     5000000
 #define BUTTON_REPEAT_TIME    5
 
-static const char *TAG = "main";
+static const char* TAG = "main";
 static button_handle_t g_btns[BUTTON_NUM] = { 0 };
 static bool button_long_press = false;
 static esp_timer_handle_t restart_timer;
@@ -211,10 +211,10 @@ typedef struct node_info_list {
 } node_info_list_t;
 
 static uint32_t nodes_num = 0;
-static node_info_list_t *node_info_list = NULL;
+static node_info_list_t* node_info_list = NULL;
 static SemaphoreHandle_t node_info_mutex;
 
-const node_info_list_t *esp_mesh_lite_get_nodes_list(uint32_t *size)
+const node_info_list_t* esp_mesh_lite_get_nodes_list(uint32_t* size)
 {
     if (size) {
         *size = nodes_num;
@@ -222,8 +222,7 @@ const node_info_list_t *esp_mesh_lite_get_nodes_list(uint32_t *size)
     return node_info_list;
 }
 
-
-static esp_err_t esp_mesh_lite_node_info_update(uint8_t red, uint8_t green, uint8_t blue, uint8_t* mac, uint32_t ip_addr, uint8_t level, bool checkOnlyColor)
+static esp_err_t esp_mesh_lite_node_info_update(uint8_t red, uint8_t green, uint8_t blue, uint8_t* mac, uint32_t ip_addr, uint8_t level, bool updateColor, bool updateAddress)
 {
     xSemaphoreTake(node_info_mutex, portMAX_DELAY);
     node_info_list_t* new = node_info_list;
@@ -232,27 +231,35 @@ static esp_err_t esp_mesh_lite_node_info_update(uint8_t red, uint8_t green, uint
     while (new) {
         if (!memcmp(new->node->mac_addr, mac, ETH_HWADDR_LEN)) {
             new->ttl = (CONFIG_MESH_LITE_REPORT_INTERVAL + MESH_LITE_REPORT_INTERVAL_BUFFER);
-            if ((new->node->red != red) || (new->node->green != green) || (new->node->blue != blue) 
-                        || (!checkOnlyColor && new->node->ip_addr != ip_addr) || (!checkOnlyColor && new->node->level != level) ) {
+            if (updateColor && (new->node->red != red || new->node->green != green || new->node->blue != blue)) {
+                ESP_LOGI(TAG, "Update color");
                 new->node->red = red;
                 new->node->green = green;
                 new->node->blue = blue;
+            }
+
+            if (updateAddress && (new->node->ip_addr != ip_addr || new->node->level != level)) {
+                ESP_LOGI(TAG, "Update address");
                 new->node->ip_addr = ip_addr;
                 new->node->level = level;
-            } else {
+            }
+            else if (updateAddress) {
+                ESP_LOGI(TAG, "Data is not changed");
                 xSemaphoreGive(node_info_mutex);
                 return ESP_ERR_DUPLICATE_ADDITION;
             }
             xSemaphoreGive(node_info_mutex);
             return ESP_OK;
-        } else {
+        }
+        else {
             if (new->ttl <= MESH_LITE_REPORT_INTERVAL_BUFFER) {
                 if (node_info_list == new) {
                     node_info_list = new->next;
                     free(new->node);
                     free(new);
                     new = node_info_list;
-                } else {
+                }
+                else {
                     prev->next = new->next;
                     free(new->node);
                     free(new);
@@ -260,7 +267,7 @@ static esp_err_t esp_mesh_lite_node_info_update(uint8_t red, uint8_t green, uint
                 }
                 nodes_num--;
             }
-            prev = new;            
+            prev = new;
         }
         new = new->next;
     }
@@ -295,6 +302,23 @@ static esp_err_t esp_mesh_lite_node_info_update(uint8_t red, uint8_t green, uint
 
     xSemaphoreGive(node_info_mutex);
     return ESP_OK;
+}
+
+static esp_mesh_lite_node_info_t* esp_mesh_lite_get_node(uint8_t* mac)
+{
+    xSemaphoreTake(node_info_mutex, portMAX_DELAY);
+    node_info_list_t* new = node_info_list;
+    node_info_list_t* prev = NULL;
+
+    while (new) {
+        if (!memcmp(new->node->mac_addr, mac, ETH_HWADDR_LEN)) {
+            xSemaphoreGive(node_info_mutex);
+            return new->node;
+        }
+        new = new->next;
+    }
+
+    return NULL;
 }
 
 static esp_err_t names_get_handler(httpd_req_t* req)
@@ -338,12 +362,12 @@ static esp_err_t names_get_handler(httpd_req_t* req)
     return ESP_OK;
 }
 
-static esp_err_t str2mac(const char *str, uint8_t *mac_addr)
+static esp_err_t str2mac(const char* str, uint8_t* mac_addr)
 {
     unsigned int mac_tmp[ETH_HWADDR_LEN];
     if (ETH_HWADDR_LEN != sscanf(str, "%02x:%02x:%02x:%02x:%02x:%02x%*c",
-                    &mac_tmp[0], &mac_tmp[1], &mac_tmp[2],
-                    &mac_tmp[3], &mac_tmp[4], &mac_tmp[5])) {
+        &mac_tmp[0], &mac_tmp[1], &mac_tmp[2],
+        &mac_tmp[3], &mac_tmp[4], &mac_tmp[5])) {
         return ESP_ERR_INVALID_MAC;
     }
     for (int i = 0; i < ETH_HWADDR_LEN; i++) {
@@ -376,23 +400,41 @@ static esp_err_t registry_post_handler(httpd_req_t* req)
     //ESP_LOGI(TAG, "buf %s", buf);
 
     cJSON* root = cJSON_Parse(buf);
-    char *mac_str = cJSON_GetObjectItem(root, "mac")->valuestring;
+    char* mac_str = cJSON_GetObjectItem(root, "mac")->valuestring;
     uint32_t ip_addr = cJSON_GetObjectItem(root, "ip")->valueint;
     uint8_t lvl = cJSON_GetObjectItem(root, "level")->valueint;
-    uint8_t red = cJSON_GetObjectItem(root, "red")->valueint;
-    uint8_t green = cJSON_GetObjectItem(root, "green")->valueint;
-    uint8_t blue = cJSON_GetObjectItem(root, "blue")->valueint;
+    uint8_t red = cJSON_GetObjectItem(root, "red")->valueint; // currently is not used
+    red = 255;
+    uint8_t green = cJSON_GetObjectItem(root, "green")->valueint; // currently is not used
+    green = 255;
+    uint8_t blue = cJSON_GetObjectItem(root, "blue")->valueint; // currently is not used
+    blue = 255;
 
     ESP_LOGI(TAG, "Registration of node with mac %s, and ip %" PRIu32, mac_str, ip_addr);
 
     uint8_t mac_addr[ETH_HWADDR_LEN];
     str2mac(mac_str, mac_addr);
-    bool checkOnlyColor = false;
-    esp_mesh_lite_node_info_update(red, green, blue, mac_addr, ip_addr, lvl, checkOnlyColor);
-
+    esp_mesh_lite_node_info_update(-1, -1, -1, mac_addr, ip_addr, lvl, false, true);
     cJSON_Delete(root);
 
-    httpd_resp_sendstr(req, "{\"status\":\"Post control value successfully\"}");
+    esp_mesh_lite_node_info_t* node = esp_mesh_lite_get_node(mac_addr);
+    if (node != NULL) {
+        red = node->red;
+        green = node->green;
+        blue = node->blue;
+
+        ESP_LOGI(TAG, "Loaded from memory node with mac="MACSTR" red=%d green=%d blue=%d", MAC2STR(mac_addr), red, green, blue);
+    }
+
+    cJSON* item = cJSON_CreateObject();
+    cJSON_AddNumberToObject(item, "red", red);
+    cJSON_AddNumberToObject(item, "green", green);
+    cJSON_AddNumberToObject(item, "blue", blue);
+    const char* resp = cJSON_Print(item);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, resp);
+
     return ESP_OK;
 }
 
@@ -419,7 +461,7 @@ static esp_err_t light_brightness_post_handler(httpd_req_t* req)
     buf[total_len] = '\0';
 
     cJSON* root = cJSON_Parse(buf);
-    char *mac_str = cJSON_GetObjectItem(root, "mac")->valuestring;
+    char* mac_str = cJSON_GetObjectItem(root, "mac")->valuestring;
     uint8_t red = cJSON_GetObjectItem(root, "red")->valueint;
     uint8_t green = cJSON_GetObjectItem(root, "green")->valueint;
     uint8_t blue = cJSON_GetObjectItem(root, "blue")->valueint;
@@ -428,8 +470,7 @@ static esp_err_t light_brightness_post_handler(httpd_req_t* req)
 
     uint8_t mac_addr[ETH_HWADDR_LEN];
     str2mac(mac_str, mac_addr);
-    bool checkOnlyColor = true;
-    esp_mesh_lite_node_info_update(red, green, blue, mac_addr, 0, 0, checkOnlyColor);
+    esp_mesh_lite_node_info_update(red, green, blue, mac_addr, -1, -1, true, false);
 
     cJSON_Delete(root);
 
